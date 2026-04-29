@@ -149,7 +149,7 @@ build_exe.bat
 ## Contributors
 
 - **math89423-star** — Creator & Maintainer
-- **Claude (Anthropic)** — Architecture design, documentation, code review
+- **[Claude](https://github.com/anthropics)** — Architecture design, documentation, code review
 
 ## License
 
