@@ -1,0 +1,41 @@
+# Logs
+*.log
+
+# Data
+uploads/
+mysql_data/
+redis_data/
+
+# Env
+.env
+.env.*
+!.env.*.example
+
+# Python
+venv/
+env/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Node (if frontend added later)
+node_modules/
+package-lock.json
+dist/
+
+# PyInstaller
+build/
+dist/
+*.spec
+!DualModeStarter.spec
+
+# Claude Code
+.claude/
