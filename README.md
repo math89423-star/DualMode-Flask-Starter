@@ -146,6 +146,11 @@ build_exe.bat
 | `init` | 裸机初始化（创建 venv + 安装依赖） |
 | `run` | 裸机启动后端 |
 
+## Contributors
+
+- **math89423-star** — Creator & Maintainer
+- **Claude (Anthropic)** — Architecture design, documentation, code review
+
 ## License
 
 MIT
