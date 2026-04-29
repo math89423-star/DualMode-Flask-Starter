@@ -214,3 +214,74 @@ Server 模式由 4 个容器组成：
 **新增后台任务**：任务函数必须接受可序列化的参数（ID 而非 ORM 对象），因为 RQ 会跨进程传递参数。在函数内部通过 ID 重新查询数据库获取实体。
 
 **前端集成**：构建产物放在 `app/frontend/dist/`。Desktop 模式由 Flask 的 `send_from_directory` 提供服务，Server 模式由 Nginx 直接 serve 静态文件。两种模式下 API 路径一致（`/api/*`），前端代码无需区分。
+
+## 请求校验层
+
+框架使用 Pydantic v2 进行请求数据校验，通过自定义装饰器 `@validate_request` 集成到 Flask 路由中。
+
+### 数据流
+
+```
+HTTP Request → Flask Route
+                  │
+          @validate_request(Schema)
+                  │
+          request.get_json()
+                  │
+          Schema.model_validate(data)
+                  │
+            ┌─────┴─────┐
+         校验通过      校验失败
+            │           │
+     body 注入 kwargs   422 + 详细错误
+            │
+       路由函数执行
+```
+
+### 文件职责
+
+- **`schemas.py`** — 定义 Pydantic 模型（`ItemCreate`、`ItemResponse`、`ErrorResponse`），集中管理所有请求/响应的数据结构
+- **`utils/validation.py`** — `validate_request` 装饰器，将 Pydantic 的 `ValidationError` 转换为 422 JSON 响应
+
+响应序列化使用 `model.model_dump(mode="json")` 确保 datetime 等类型正确转换。模型配置 `from_attributes = True` 支持直接从 SQLAlchemy ORM 对象构造。
+
+## SSE 流式输出
+
+框架内置基于 PubSub 的 Server-Sent Events 支持，Desktop 模式使用 MemoryRedis 的内存 PubSub，Server 模式使用 Redis PubSub，上层代码完全一致。
+
+### 数据流
+
+```
+客户端                    Flask Route              PubSub              Worker
+  │                          │                      │                   │
+  ├─ GET /items/1/stream ──→ │                      │                   │
+  │                          ├─ subscribe(channel) → │                   │
+  │                          │                      │                   │
+  │                          │    ┌─ heartbeat ──── │                   │
+  │ ◄── : heartbeat ────────┤    │  (每 15s)       │                   │
+  │                          │    │                  │ ◄── publish() ── │
+  │ ◄── data: {"status":... ┤ ◄──┘ get_message() ──┤                   │
+  │                          │                      │ ◄── publish() ── │
+  │ ◄── data: {"status":    │ ◄── get_message() ── │   "completed"     │
+  │       "completed"} ─────┤                      │                   │
+  │                          ├─ unsubscribe() ────→ │                   │
+  │  (连接关闭)              │                      │                   │
+```
+
+### 文件职责
+
+- **`utils/sse.py`** — `sse_stream(channel)` 生成器，订阅 PubSub channel 并 yield SSE 格式数据；内置心跳保活（15s）和超时断开（30s 无消息）；收到 `completed` 或 `failed` 状态自动结束流
+- **`config.py`** — `RedisKeyManager.stream_channel(task_id)` 生成 channel 命名（`stream:task:{id}`）
+- **`worker_engine.py`** — 在任务状态变更时调用 `redis_client.publish()` 发布事件
+
+### SSE 格式
+
+```
+data: {"item_id": 1, "status": "processing", "message": "Started processing: test"}
+
+: heartbeat
+
+data: {"item_id": 1, "status": "completed", "message": "Item 1 completed"}
+```
+
+前端通过标准 `EventSource` API 接收，无需额外依赖。

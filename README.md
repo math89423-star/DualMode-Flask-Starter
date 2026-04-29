@@ -73,15 +73,18 @@ build_exe.bat
 │   │   ├── memory_queue.py         # MemoryQueue — RQ 的线程替身
 │   │   ├── paths.py                # PyInstaller 路径兼容层
 │   │   ├── worker_engine.py        # 后台任务处理器
+│   │   ├── schemas.py              # Pydantic 请求/响应模型
 │   │   ├── model/
 │   │   │   ├── models.py           # 数据模型（含跨数据库类型适配）
 │   │   │   └── init_db.py          # 数据库初始化
 │   │   ├── routes/
-│   │   │   └── example.py          # 示例 CRUD + 任务入队 API
+│   │   │   └── example.py          # 示例 CRUD + SSE 流式端点
 │   │   ├── services/
 │   │   │   └── example_service.py  # 业务逻辑层
 │   │   └── utils/
-│   │       └── logging_config.py
+│   │       ├── logging_config.py
+│   │       ├── validation.py       # Pydantic 校验装饰器
+│   │       └── sse.py              # SSE 流式输出工具
 │   ├── config/
 │   │   ├── nginx/nginx.conf        # Nginx 反向代理配置
 │   │   └── redis.conf              # Redis 配置
@@ -115,6 +118,56 @@ build_exe.bat
 ### 接入前端
 
 将前端构建产物输出到 `app/frontend/dist/`。Desktop 模式由 Flask 直接 serve，Server 模式由 Nginx 代理。
+
+### 请求校验（Pydantic）
+
+在 `app/backend/schemas.py` 中定义 Pydantic 模型，然后用 `@validate_request` 装饰器应用到路由：
+
+```python
+from backend.schemas import ItemCreate
+from backend.utils.validation import validate_request
+
+@bp.route('/items', methods=['POST'])
+@validate_request(ItemCreate)
+def create_item(body: ItemCreate):
+    # body 已通过校验，直接使用
+    item = Item(title=body.title, description=body.description)
+```
+
+校验失败自动返回 422 + 详细字段错误信息。
+
+### SSE 流式输出
+
+框架内置了基于 PubSub 的 SSE 支持，Desktop 和 Server 模式自动适配：
+
+```python
+from flask import Response
+from backend.utils.sse import sse_stream
+from backend.config import RedisKeyManager
+
+@bp.route('/items/<int:item_id>/stream')
+def stream_item(item_id):
+    channel = RedisKeyManager.stream_channel(item_id)
+    return Response(sse_stream(channel), mimetype='text/event-stream')
+```
+
+在后台任务中发布事件：
+
+```python
+from backend.extensions import redis_client
+from backend.config import RedisKeyManager
+import json
+
+channel = RedisKeyManager.stream_channel(item_id)
+redis_client.publish(channel, json.dumps({"status": "processing", "message": "..."}))
+```
+
+前端通过 `EventSource` 接收：
+
+```javascript
+const es = new EventSource('/api/items/1/stream');
+es.onmessage = (e) => console.log(JSON.parse(e.data));
+```
 
 ## 环境变量
 
